@@ -6,13 +6,13 @@ from telegram.ext import (
     MessageHandler, filters
 )
 
-# Токен бота
+# Токен Telegram бота (берется из Environment)
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
-# Словарь для хранения истории диалога
+# История диалога по chat_id
 chat_history = {}
 
-# Кнопки
+# Основные кнопки
 def main_keyboard():
     keyboard = [
         [InlineKeyboardButton("Старт", callback_data="start")],
@@ -26,22 +26,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     chat_history[chat_id] = []
     await update.message.reply_text(
-        "Привет! Я бот с AI (Hugging Face). Нажми кнопку или напиши сообщение.",
+        "Привет! Я бот с AI на бесплатной модели Hugging Face.\nНапиши сообщение или используй кнопки ниже.",
         reply_markup=main_keyboard()
     )
 
-# Кнопки
+# Обработка кнопок
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     chat_id = query.message.chat.id
     await query.answer()
     if query.data == "start":
         chat_history[chat_id] = []
-        await query.edit_message_text("Начинаем заново! Отправь сообщение.", reply_markup=main_keyboard())
+        await query.edit_message_text("Начинаем новый диалог. Напиши сообщение!", reply_markup=main_keyboard())
     elif query.data == "help":
         await query.edit_message_text(
-            "Я могу отвечать на твои сообщения с помощью AI.\n"
-            "Кнопки:\n/start — начать заново\n/help — помощь\n/clear — очистить историю",
+            "Я отвечаю на твои сообщения с помощью бесплатного AI.\n\n"
+            "Кнопки:\n"
+            "/start — начать заново\n"
+            "/help — помощь\n"
+            "/clear — очистить историю",
             reply_markup=main_keyboard()
         )
     elif query.data == "clear":
@@ -50,20 +53,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Функция запроса к бесплатной модели Hugging Face
 def query_huggingface(prompt):
-    # Используем модель GPT-J бесплатно через Inference API Hugging Face
+    """
+    Используем бесплатную модель GPT-J через Hugging Face Inference API.
+    Для бесплатного использования HF_API_KEY можно не указывать.
+    """
     url = "https://api-inference.huggingface.co/models/EleutherAI/gpt-j-6B"
-    headers = {"Authorization": f"Bearer {os.environ.get('HF_API_KEY','')}"}
-    payload = {"inputs": prompt}
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
-    if response.status_code == 200:
-        try:
-            return response.json()[0]['generated_text']
-        except Exception:
-            return "AI не смог сгенерировать ответ."
-    else:
-        return f"Ошибка AI: {response.status_code}"
+    headers = {}
+    hf_key = os.environ.get("HF_API_KEY", "")
+    if hf_key:
+        headers["Authorization"] = f"Bearer {hf_key}"
 
-# Обработка текста
+    try:
+        response = requests.post(url, headers=headers, json={"inputs": prompt}, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            return result[0].get('generated_text', "AI не смог сгенерировать ответ.")
+        else:
+            return f"Ошибка AI: {response.status_code}"
+    except Exception as e:
+        return f"Ошибка AI: {e}"
+
+# Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
@@ -72,8 +82,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_history[chat_id] = []
 
     chat_history[chat_id].append(f"User: {user_text}")
-
-    # Формируем историю в один текст
     prompt = "\n".join(chat_history[chat_id]) + "\nAI:"
 
     answer = query_huggingface(prompt).strip()
@@ -81,11 +89,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(answer, reply_markup=main_keyboard())
 
-# Запуск через polling
+# Основной запуск через polling
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    print("Бот запускается через polling...")
+
+    print("Бот запускается через polling... Бот будет работать 24/7 на Render.")
     app.run_polling()
