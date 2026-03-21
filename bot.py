@@ -78,7 +78,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Напиши описание объявления в чат:")
     elif data == "enter_price":
         user_state[chat_id]["step"] = "price"
-        await query.edit_message_text("Напиши сумму комиссии (в ₽) в чат:")
+        await query.edit_message_text("Напиши сумму (в ₽) в чат:")
     elif data == "confirm":
         state = user_state.get(chat_id, {})
         cursor.execute("INSERT INTO jobs (user_id, role, city, title, description, price, paid) VALUES (?,?,?,?,?,?,?)",
