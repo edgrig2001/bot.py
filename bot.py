@@ -13,7 +13,7 @@ from telegram.ext import (
 ADMIN_ID = 869818784
 DONATE_URL = "https://вразработке"
 
-# ---------------- Flask ----------------
+# ---------------- Flask для Render ----------------
 app_web = Flask(__name__)
 
 @app_web.route("/")
@@ -26,7 +26,6 @@ def run_web():
 
 # ---------------- TOKEN ----------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-
 if not TELEGRAM_TOKEN:
     print("Нет токена")
     exit(1)
@@ -121,7 +120,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
 
-        # 🔥 УВЕДОМЛЕНИЕ ТЕБЕ
+        # Уведомление администратору
         await context.bot.send_message(
             ADMIN_ID,
             f"📩 Новое объявление!\n\n"
@@ -132,7 +131,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         user_state.pop(chat_id)
-
         await query.edit_message_text("✅ Объявление опубликовано!", reply_markup=main_keyboard())
 
     elif data == "search":
@@ -204,14 +202,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 {state['price']} ₽\n📞 {state['contact']}",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Подтвердить", callback_data="confirm"),
-                 InlineKeyboardButton("Отмена", callback_data="cancel")]
+                 InlineKeyboardButton("Отмена", callback_data="menu")]
             ])
         )
         state.pop("step")
 
 # ---------------- ЗАПУСК ----------------
 if __name__ == "__main__":
-    # 🔥 Flask для Render (живой сервис)
+    # Flask для Render
     threading.Thread(target=run_web).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -219,7 +217,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    # Удаляем старые вебхуки, чтобы не было conflict
+    # Удаляем старые вебхуки
     app.bot.delete_webhook(drop_pending_updates=True)
 
     print("BOT STARTED")
