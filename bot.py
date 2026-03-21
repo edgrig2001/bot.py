@@ -6,13 +6,13 @@ from telegram.ext import (
     MessageHandler, filters
 )
 
-# Telegram токен
+# Telegram token
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 if not TELEGRAM_TOKEN:
     print("Ошибка: TELEGRAM_TOKEN не задан")
     exit(1)
 
-# SQLite база
+# База объявлений
 conn = sqlite3.connect("jobs.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 """)
 conn.commit()
 
-# состояние пользователя при добавлении объявления
+# Состояние пользователя при добавлении
 user_state = {}
 
 # Главное меню
@@ -44,22 +44,17 @@ def main_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# старт
+# /start
 async def start(update: Update, context):
-    chat_id = update.message.chat.id
-    await update.message.reply_text(
-        "Главное меню:",
-        reply_markup=main_keyboard()
-    )
+    await update.message.reply_text("Главное меню:", reply_markup=main_keyboard())
 
-# обработка кнопок
+# Обработка кнопок
 async def button(update: Update, context):
     query = update.callback_query
     await query.answer()
     chat_id = query.from_user.id
     data = query.data
 
-    # Добавление объявления
     if data == "add":
         keyboard = [
             [InlineKeyboardButton("Работодатель", callback_data="role_employer")],
@@ -71,7 +66,7 @@ async def button(update: Update, context):
     elif data.startswith("role_"):
         role = "работодатель" if data=="role_employer" else "соискатель"
         user_state[chat_id] = {"role": role, "telegram_user": query.from_user.first_name}
-        await query.edit_message_text("Теперь добавим название объявления:", 
+        await query.edit_message_text("Добавим название объявления:", 
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ввести название", callback_data="enter_title")]]))
 
     elif data == "enter_title":
@@ -129,7 +124,7 @@ async def button(update: Update, context):
         user_state.pop(chat_id, None)
         await query.edit_message_text("Действие отменено.", reply_markup=main_keyboard())
 
-# обработка сообщений для ввода текста
+# Обработка сообщений для ввода текста
 async def handle_message(update: Update, context):
     chat_id = update.message.chat.id
     state = user_state.get(chat_id, {})
@@ -157,11 +152,11 @@ async def handle_message(update: Update, context):
             await update.message.reply_text("Введите корректное число!")
     elif step == "client_name":
         state["client_name"] = text
-        await update.message.reply_text("Имя сохранено. Нажмите 'Оплатить' чтобы опубликовать.",
+        await update.message.reply_text("Имя сохранено. Нажмите 'Оплатить', чтобы опубликовать.",
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Оплатить", callback_data="confirm"), InlineKeyboardButton("Отмена", callback_data="cancel")]]))
         state.pop("step")
 
-# запуск бота
+# Запуск
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
