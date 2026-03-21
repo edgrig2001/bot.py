@@ -1,100 +1,153 @@
 import os
-import requests
+import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler,
-    MessageHandler, filters
+    MessageHandler, filters, ConversationHandler
 )
 
-# Токен Telegram бота (берется из Environment)
+# Токен Telegram бота
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
-# История диалога по chat_id
-chat_history = {}
+# Создаём базу данных SQLite для хранения объявлений
+conn = sqlite3.connect("jobs.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    role TEXT,
+    city TEXT,
+    title TEXT,
+    description TEXT,
+    price REAL,
+    paid INTEGER
+)
+""")
+conn.commit()
 
-# Основные кнопки
+# Состояния для ConversationHandler
+ROLE, TITLE, DESC, PRICE, CONFIRM = range(5)
+
+# Главное меню
 def main_keyboard():
     keyboard = [
-        [InlineKeyboardButton("Старт", callback_data="start")],
-        [InlineKeyboardButton("Помощь", callback_data="help")],
-        [InlineKeyboardButton("Очистить историю", callback_data="clear")]
+        [InlineKeyboardButton("Добавить объявление", callback_data="add")],
+        [InlineKeyboardButton("Искать работу/услугу", callback_data="search")],
+        [InlineKeyboardButton("Мои объявления", callback_data="my")],
+        [InlineKeyboardButton("Помощь", callback_data="help")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    chat_history[chat_id] = []
     await update.message.reply_text(
-        "Привет! Я бот с AI на бесплатной модели Hugging Face.\nНапиши сообщение или используй кнопки ниже.",
+        "Привет! Я бот для поиска работы и услуг.\nВыбери действие:",
         reply_markup=main_keyboard()
     )
 
 # Обработка кнопок
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    chat_id = query.message.chat.id
     await query.answer()
-    if query.data == "start":
-        chat_history[chat_id] = []
-        await query.edit_message_text("Начинаем новый диалог. Напиши сообщение!", reply_markup=main_keyboard())
+    if query.data == "add":
+        await query.edit_message_text("Ты работодатель или соискатель? Напиши 'работодатель' или 'соискатель'")
+        return ROLE
+    elif query.data == "search":
+        jobs = cursor.execute("SELECT title, description, price, city FROM jobs WHERE paid=1").fetchall()
+        if not jobs:
+            text = "Пока нет оплаченных объявлений."
+        else:
+            text = "\n\n".join([f"{t[0]} ({t[3]})\n{t[1]}\nКомиссия: {t[2]} ₽" for t in jobs])
+        await query.edit_message_text(text, reply_markup=main_keyboard())
+        return ConversationHandler.END
+    elif query.data == "my":
+        chat_id = query.from_user.id
+        jobs = cursor.execute("SELECT title, description, price, paid FROM jobs WHERE user_id=?", (chat_id,)).fetchall()
+        if not jobs:
+            text = "У тебя нет объявлений."
+        else:
+            text = "\n\n".join([f"{t[0]}\n{t[1]}\nКомиссия: {t[2]} ₽\nОплачено: {'Да' if t[3] else 'Нет'}" for t in jobs])
+        await query.edit_message_text(text, reply_markup=main_keyboard())
+        return ConversationHandler.END
     elif query.data == "help":
         await query.edit_message_text(
-            "Я отвечаю на твои сообщения с помощью бесплатного AI.\n\n"
-            "Кнопки:\n"
-            "/start — начать заново\n"
-            "/help — помощь\n"
-            "/clear — очистить историю",
+            "Добавление объявлений: нужно указать роль, название, описание и сумму комиссии.\n"
+            "Оплата комиссии пока имитируется кнопкой.\n"
+            "Искать работу/услугу: просматриваются только оплаченные объявления.",
             reply_markup=main_keyboard()
         )
-    elif query.data == "clear":
-        chat_history[chat_id] = []
-        await query.edit_message_text("История очищена.", reply_markup=main_keyboard())
+        return ConversationHandler.END
 
-# Функция запроса к бесплатной модели Hugging Face
-def query_huggingface(prompt):
-    """
-    Используем бесплатную модель GPT-J через Hugging Face Inference API.
-    Для бесплатного использования HF_API_KEY можно не указывать.
-    """
-    url = "https://api-inference.huggingface.co/models/EleutherAI/gpt-j-6B"
-    headers = {}
-    hf_key = os.environ.get("HF_API_KEY", "")
-    if hf_key:
-        headers["Authorization"] = f"Bearer {hf_key}"
+# Добавление объявления — шаги
+async def role_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+    if text not in ["работодатель", "соискатель"]:
+        await update.message.reply_text("Пиши только 'работодатель' или 'соискатель'")
+        return ROLE
+    context.user_data["role"] = text
+    await update.message.reply_text("Введи название объявления:")
+    return TITLE
 
+async def title_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["title"] = update.message.text
+    await update.message.reply_text("Введи описание:")
+    return DESC
+
+async def desc_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["desc"] = update.message.text
+    await update.message.reply_text("Введи сумму комиссии (в ₽):")
+    return PRICE
+
+async def price_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        response = requests.post(url, headers=headers, json={"inputs": prompt}, timeout=30)
-        if response.status_code == 200:
-            result = response.json()
-            return result[0].get('generated_text', "AI не смог сгенерировать ответ.")
-        else:
-            return f"Ошибка AI: {response.status_code}"
-    except Exception as e:
-        return f"Ошибка AI: {e}"
+        price = float(update.message.text)
+        context.user_data["price"] = price
+    except:
+        await update.message.reply_text("Введи число для комиссии")
+        return PRICE
+    await update.message.reply_text(f"Твоя комиссия: {price} ₽\nНажми 'Оплатить' чтобы опубликовать или /cancel для отмены",
+                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Оплатить", callback_data="pay")]]))
+    return CONFIRM
 
-# Обработка текстовых сообщений
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user_text = update.message.text
+async def confirm_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.from_user.id
+    # Сохраняем объявление как оплачено (имитация платежа)
+    cursor.execute(
+        "INSERT INTO jobs (user_id, role, city, title, description, price, paid) VALUES (?,?,?,?,?,?,?)",
+        (chat_id, context.user_data["role"], "Челны", context.user_data["title"], context.user_data["desc"], context.user_data["price"], 1)
+    )
+    conn.commit()
+    await query.edit_message_text("Объявление опубликовано!", reply_markup=main_keyboard())
+    return ConversationHandler.END
 
-    if chat_id not in chat_history:
-        chat_history[chat_id] = []
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Действие отменено", reply_markup=main_keyboard())
+    return ConversationHandler.END
 
-    chat_history[chat_id].append(f"User: {user_text}")
-    prompt = "\n".join(chat_history[chat_id]) + "\nAI:"
-
-    answer = query_huggingface(prompt).strip()
-    chat_history[chat_id].append(f"AI: {answer}")
-
-    await update.message.reply_text(answer, reply_markup=main_keyboard())
-
-# Основной запуск через polling
+# Запуск бота
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Основные кнопки
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    print("Бот запускается через polling... Бот будет работать 24/7 на Render.")
+    # Conversation для добавления объявления
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & (~filters.COMMAND), role_step)],
+        states={
+            ROLE: [MessageHandler(filters.TEXT & (~filters.COMMAND), role_step)],
+            TITLE: [MessageHandler(filters.TEXT & (~filters.COMMAND), title_step)],
+            DESC: [MessageHandler(filters.TEXT & (~filters.COMMAND), desc_step)],
+            PRICE: [MessageHandler(filters.TEXT & (~filters.COMMAND), price_step)],
+            CONFIRM: [CallbackQueryHandler(confirm_step, pattern="pay")]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    app.add_handler(conv_handler)
+
+    print("Бот для поиска работы/услуг запускается...")
     app.run_polling()
