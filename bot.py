@@ -24,7 +24,10 @@ def main_keyboard():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     chat_history[chat_id] = []
-    await update.message.reply_text("Привет! Я бот с AI. Нажми кнопку или напиши сообщение.", reply_markup=main_keyboard())
+    await update.message.reply_text(
+        "Привет! Я бот с AI. Нажми кнопку или напиши сообщение.",
+        reply_markup=main_keyboard()
+    )
 
 # Обработчик кнопок
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55,14 +58,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Добавляем сообщение пользователя в историю
     chat_history[chat_id].append({"role": "user", "content": user_text})
 
-    # Запрос к OpenAI
+    # Запрос к OpenAI (новый синтаксис)
     try:
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=chat_history[chat_id]
         )
         answer = response.choices[0].message.content.strip()
-        # Добавляем ответ AI в историю
         chat_history[chat_id].append({"role": "assistant", "content": answer})
         await update.message.reply_text(answer, reply_markup=main_keyboard())
     except Exception as e:
