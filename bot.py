@@ -26,8 +26,9 @@ def run_web():
 
 # ---------------- TOKEN ----------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+
 if not TELEGRAM_TOKEN:
-    print("Нет токена")
+    print("Ошибка: TELEGRAM_TOKEN не задан")
     exit(1)
 
 # ---------------- БАЗА ----------------
@@ -63,9 +64,7 @@ def main_keyboard():
 
 # ---------------- START ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat.id
-    user_state[chat_id] = {"step": "auth"}
-    await update.message.reply_text("👤 Введите ваше имя:")
+    await update.message.reply_text("Выбери действие:", reply_markup=main_keyboard())
 
 # ---------------- MENU ----------------
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -209,16 +208,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- ЗАПУСК ----------------
 if __name__ == "__main__":
-    # Flask для Render
+    # 🔥 фикс Render (порт)
     threading.Thread(target=run_web).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    # Удаляем старые вебхуки
     app.bot.delete_webhook(drop_pending_updates=True)
 
     print("BOT STARTED")
-    app.run_polling(close_loop=False)
+    app.run_polling()
