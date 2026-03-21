@@ -1,22 +1,23 @@
 import os
+import asyncio
 import sqlite3
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# -----------------------------
-# Настройки
-# -----------------------------
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-PORT = int(os.environ.get("PORT", 5000))  # Render Web Service порт
-if not TELEGRAM_TOKEN:
-    print("Ошибка: TELEGRAM_TOKEN не задан")
-    exit(1)
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+PORT = int(os.environ.get("PORT", 10000))
 
-# -----------------------------
-# База данных
-# -----------------------------
+# ---------------- БАЗА ----------------
 conn = sqlite3.connect("jobs.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -24,168 +25,142 @@ CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     role TEXT,
-    city TEXT,
     title TEXT,
     description TEXT,
     amount REAL,
     commission REAL,
-    client_name TEXT,
-    paid INTEGER
+    name TEXT
 )
 """)
 conn.commit()
 
 user_state = {}
 
-# -----------------------------
-# Главное меню
-# -----------------------------
-def main_keyboard():
-    keyboard = [
+# ---------------- HTTP ДЛЯ RENDER ----------------
+def start_http():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    print("PORT OPEN", PORT)
+    server.serve_forever()
+
+# ---------------- КНОПКИ ----------------
+def main_menu():
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("Добавить объявление", callback_data="add")],
-        [InlineKeyboardButton("Искать работу/услугу", callback_data="search")],
-        [InlineKeyboardButton("Мои объявления", callback_data="my")],
-        [InlineKeyboardButton("Помощь", callback_data="help")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+        [InlineKeyboardButton("Смотреть объявления", callback_data="list")]
+    ])
 
-# -----------------------------
-# Команды и кнопки
-# -----------------------------
-async def start(update: Update, context):
-    await update.message.reply_text("Главное меню:", reply_markup=main_keyboard())
+# ---------------- START ----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Меню:", reply_markup=main_menu())
 
-async def button(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.from_user.id
-    data = query.data
+# ---------------- КНОПКИ ----------------
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    data = q.data
 
     if data == "add":
-        keyboard = [
-            [InlineKeyboardButton("Работодатель", callback_data="role_employer")],
-            [InlineKeyboardButton("Соискатель", callback_data="role_worker")],
-            [InlineKeyboardButton("Отмена", callback_data="cancel")]
-        ]
-        await query.edit_message_text("Выберите роль:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data.startswith("role_"):
-        role = "работодатель" if data=="role_employer" else "соискатель"
-        user_state[chat_id] = {"role": role, "telegram_user": query.from_user.first_name}
-        await query.edit_message_text("Добавим название объявления:", 
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ввести название", callback_data="enter_title")]]))
-
-    elif data == "enter_title":
-        user_state[chat_id]["step"] = "title"
-        await query.edit_message_text("Напишите название в чат:")
-
-    elif data == "enter_desc":
-        user_state[chat_id]["step"] = "desc"
-        await query.edit_message_text("Напишите описание в чат:")
-
-    elif data == "enter_amount":
-        user_state[chat_id]["step"] = "amount"
-        await query.edit_message_text("Введите сумму в ₽:")
-
-    elif data == "enter_client_name":
-        user_state[chat_id]["step"] = "client_name"
-        await query.edit_message_text("Введите ваше имя для контакта:")
-
-    elif data == "confirm":
-        state = user_state.get(chat_id, {})
-        if not state:
-            await query.edit_message_text("Ошибка: состояние не найдено", reply_markup=main_keyboard())
-            return
-        cursor.execute(
-            "INSERT INTO jobs (user_id, role, city, title, description, amount, commission, client_name, paid) VALUES (?,?,?,?,?,?,?,?,?)",
-            (chat_id, state["role"], "Челны", state["title"], state["desc"], state["amount"], state["commission"], state["client_name"], 1)
-        )
-        conn.commit()
-        user_state.pop(chat_id)
-        await query.edit_message_text("Объявление опубликовано!", reply_markup=main_keyboard())
-
-    elif data == "search":
-        jobs = cursor.execute("SELECT title, description, amount, commission, client_name, city FROM jobs WHERE paid=1").fetchall()
-        if not jobs:
-            text = "Пока нет объявлений."
-        else:
-            text = "\n\n".join([f"{t[0]} ({t[5]})\n{t[1]}\nСумма: {t[2]} ₽, Комиссия: {t[3]} ₽\nИмя: {t[4]}" for t in jobs])
-        await query.edit_message_text(text, reply_markup=main_keyboard())
-
-    elif data == "my":
-        jobs = cursor.execute("SELECT title, description, amount, commission, paid FROM jobs WHERE user_id=?", (chat_id,)).fetchall()
-        if not jobs:
-            text = "У вас нет объявлений."
-        else:
-            text = "\n\n".join([f"{t[0]}\n{t[1]}\nСумма: {t[2]} ₽\nКомиссия: {t[3]} ₽\nОплачено: {'Да' if t[4] else 'Нет'}" for t in jobs])
-        await query.edit_message_text(text, reply_markup=main_keyboard())
-
-    elif data == "help":
-        await query.edit_message_text(
-            "Добавление через кнопки.\nСумма считается автоматически 8%.\nОплата через кнопку 'Оплатить'.",
-            reply_markup=main_keyboard()
+        user_state[uid] = {}
+        await q.edit_message_text(
+            "Кто вы:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Работодатель", callback_data="emp")],
+                [InlineKeyboardButton("Соискатель", callback_data="wrk")]
+            ])
         )
 
-    elif data == "cancel":
-        user_state.pop(chat_id, None)
-        await query.edit_message_text("Действие отменено.", reply_markup=main_keyboard())
+    elif data in ["emp", "wrk"]:
+        user_state[uid]["role"] = "работодатель" if data == "emp" else "соискатель"
+        user_state[uid]["step"] = "title"
+        await q.edit_message_text("Введите название:")
 
-# -----------------------------
-# Обработка текстовых сообщений
-# -----------------------------
-async def handle_message(update: Update, context):
-    chat_id = update.message.chat.id
-    state = user_state.get(chat_id, {})
-    step = state.get("step")
-    if not step:
+    elif data == "list":
+        rows = cursor.execute("SELECT title, description, amount, commission, name FROM jobs").fetchall()
+        if not rows:
+            text = "Нет объявлений"
+        else:
+            text = "\n\n".join([
+                f"{r[0]}\n{r[1]}\nСумма: {r[2]} ₽\nКомиссия: {r[3]} ₽\nИмя: {r[4]}"
+                for r in rows
+            ])
+        await q.edit_message_text(text, reply_markup=main_menu())
+
+# ---------------- ТЕКСТ ----------------
+async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.message.chat.id
+
+    if uid not in user_state:
         return
 
+    state = user_state[uid]
+    step = state.get("step")
     text = update.message.text.strip()
+
     if step == "title":
         state["title"] = text
-        await update.message.reply_text("Название сохранено.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ввести описание", callback_data="enter_desc")]]))
+        state["step"] = "desc"
+        await update.message.reply_text("Введите описание:")
+
     elif step == "desc":
-        state["desc"] = text
-        await update.message.reply_text("Описание сохранено.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ввести сумму", callback_data="enter_amount")]]))
+        state["description"] = text
+        state["step"] = "amount"
+        await update.message.reply_text("Введите сумму:")
+
     elif step == "amount":
         try:
             amount = float(text)
             state["amount"] = amount
             state["commission"] = round(amount * 0.08, 2)
-            total = round(amount + state["commission"], 2)
-            await update.message.reply_text(f"Сумма: {amount} ₽\nКомиссия 8%: {state['commission']} ₽\nИтого к оплате: {total} ₽",
-                                          reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ввести ваше имя", callback_data="enter_client_name")]]))
-            state.pop("step")
+            state["step"] = "name"
+
+            await update.message.reply_text(
+                f"Комиссия 8%: {state['commission']} ₽\nВведите имя:"
+            )
         except:
-            await update.message.reply_text("Введите корректное число!")
-    elif step == "client_name":
-        state["client_name"] = text
-        await update.message.reply_text("Имя сохранено. Нажмите 'Оплатить', чтобы опубликовать.",
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Оплатить", callback_data="confirm"), InlineKeyboardButton("Отмена", callback_data="cancel")]]))
-        state.pop("step")
+            await update.message.reply_text("Введите число")
 
-# -----------------------------
-# HTTP сервер для Render Web Service
-# -----------------------------
-def start_http_server():
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Bot is running!")
-    httpd = HTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"HTTP server listening on port {PORT}")
-    httpd.serve_forever()
+    elif step == "name":
+        state["name"] = text
 
-# -----------------------------
-# Запуск бота и HTTP сервера
-# -----------------------------
-if __name__ == "__main__":
-    threading.Thread(target=start_http_server, daemon=True).start()
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        cursor.execute(
+            "INSERT INTO jobs (user_id, role, title, description, amount, commission, name) VALUES (?,?,?,?,?,?,?)",
+            (
+                uid,
+                state["role"],
+                state["title"],
+                state["description"],
+                state["amount"],
+                state["commission"],
+                state["name"],
+            )
+        )
+        conn.commit()
+
+        user_state.pop(uid)
+
+        await update.message.reply_text("Объявление добавлено ✅", reply_markup=main_menu())
+
+# ---------------- ЗАПУСК ----------------
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    print("Бот запускается через polling + Web Service...")
-    app.run_polling()
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
+
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    print("BOT STARTED")
+
+    await app.run_polling()
+
+if __name__ == "__main__":
+    threading.Thread(target=start_http, daemon=True).start()
+    asyncio.run(main())
