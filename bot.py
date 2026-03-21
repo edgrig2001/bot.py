@@ -77,7 +77,7 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
     # Настройка webhook
-    WEBHOOK_URL = f"https://<твое-service-name>.onrender.com/{TELEGRAM_TOKEN}"
+    WEBHOOK_URL = f"https://bot-py-2-ct4v.onrender.com/{TELEGRAM_TOKEN}"
     app.bot.set_webhook(WEBHOOK_URL)
     print(f"Бот запускается на webhook {WEBHOOK_URL} ...")
 
