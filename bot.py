@@ -1,18 +1,22 @@
 import os
 import sqlite3
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
-# Telegram token
+# -----------------------------
+# Настройки
+# -----------------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+PORT = int(os.environ.get("PORT", 5000))  # Render Web Service порт
 if not TELEGRAM_TOKEN:
     print("Ошибка: TELEGRAM_TOKEN не задан")
     exit(1)
 
-# База объявлений
+# -----------------------------
+# База данных
+# -----------------------------
 conn = sqlite3.connect("jobs.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -31,10 +35,11 @@ CREATE TABLE IF NOT EXISTS jobs (
 """)
 conn.commit()
 
-# Состояние пользователя при добавлении
 user_state = {}
 
+# -----------------------------
 # Главное меню
+# -----------------------------
 def main_keyboard():
     keyboard = [
         [InlineKeyboardButton("Добавить объявление", callback_data="add")],
@@ -44,11 +49,12 @@ def main_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# /start
+# -----------------------------
+# Команды и кнопки
+# -----------------------------
 async def start(update: Update, context):
     await update.message.reply_text("Главное меню:", reply_markup=main_keyboard())
 
-# Обработка кнопок
 async def button(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -124,7 +130,9 @@ async def button(update: Update, context):
         user_state.pop(chat_id, None)
         await query.edit_message_text("Действие отменено.", reply_markup=main_keyboard())
 
-# Обработка сообщений для ввода текста
+# -----------------------------
+# Обработка текстовых сообщений
+# -----------------------------
 async def handle_message(update: Update, context):
     chat_id = update.message.chat.id
     state = user_state.get(chat_id, {})
@@ -156,11 +164,28 @@ async def handle_message(update: Update, context):
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Оплатить", callback_data="confirm"), InlineKeyboardButton("Отмена", callback_data="cancel")]]))
         state.pop("step")
 
-# Запуск
+# -----------------------------
+# HTTP сервер для Render Web Service
+# -----------------------------
+def start_http_server():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+    httpd = HTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"HTTP server listening on port {PORT}")
+    httpd.serve_forever()
+
+# -----------------------------
+# Запуск бота и HTTP сервера
+# -----------------------------
 if __name__ == "__main__":
+    threading.Thread(target=start_http_server, daemon=True).start()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    print("Бот запускается...")
+    print("Бот запускается через polling + Web Service...")
     app.run_polling()
