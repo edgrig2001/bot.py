@@ -4,9 +4,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Callb
 import openai
 
 # Берём токены из Environment
-TELEGRAM_TOKEN = os.environ["8585362055:AAEjQwzD42lqksiU6qtvO7vDh9q6nNl8nzo"]
-OPENAI_API_KEY = os.environ["sk-1234567890abcdef1234567890abcdef12345678"]
-
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 openai.api_key = OPENAI_API_KEY
 
 # Словарь для хранения истории диалога
