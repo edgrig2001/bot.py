@@ -211,7 +211,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- ЗАПУСК ----------------
 if __name__ == "__main__":
-    threading.Thread(target=run_web).start()
+    # Flask (для Render порта)
+    threading.Thread(target=run_web, daemon=True).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -220,12 +221,10 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
+    # УБИРАЕМ конфликты webhook
     app.bot.delete_webhook(drop_pending_updates=True)
 
     print("BOT STARTED")
-    app.run_polling()
 
-    app.bot.delete_webhook(drop_pending_updates=True)
-
-    print("BOT STARTED")
-    app.run_polling()
+    # ВАЖНО: обычный polling
+    app.run_polling(close_loop=False)
