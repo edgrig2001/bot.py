@@ -1,6 +1,9 @@
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler,
+    MessageHandler, filters
+)
 import openai
 
 # Токены берём из Environment
@@ -68,17 +71,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка AI: {e}", reply_markup=main_keyboard())
 
-# Запуск через Webhook для Render
+# Основная функция запуска (polling)
 if __name__ == "__main__":
-    PORT = int(os.environ.get("PORT", 8443))
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-
-    # Настройка webhook
-    WEBHOOK_URL = f"https://bot-py-3qnh.onrender.com/{TELEGRAM_TOKEN}"
-    app.bot.set_webhook(WEBHOOK_URL)
-    print(f"Бот запускается на webhook {WEBHOOK_URL} ...")
-
-    app.run_webhook(listen="0.0.0.0", port=PORT, url_path=TELEGRAM_TOKEN)
+    print("Бот запускается через polling...")
+    app.run_polling()
