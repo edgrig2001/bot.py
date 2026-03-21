@@ -9,8 +9,8 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    ContextTypes,
     filters,
+    ContextTypes,
 )
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -35,7 +35,7 @@ conn.commit()
 
 user_state = {}
 
-# ---------------- HTTP (для Render) ----------------
+# ---------------- HTTP ДЛЯ RENDER ----------------
 def start_http():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -52,15 +52,15 @@ def start_http():
     server.serve_forever()
 
 # ---------------- КНОПКИ ----------------
-def menu():
+def main_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Добавить", callback_data="add")],
-        [InlineKeyboardButton("Смотреть", callback_data="list")]
+        [InlineKeyboardButton("Добавить объявление", callback_data="add")],
+        [InlineKeyboardButton("Смотреть объявления", callback_data="list")]
     ])
 
 # ---------------- START ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Меню:", reply_markup=menu())
+    await update.message.reply_text("Меню:", reply_markup=main_menu())
 
 # ---------------- КНОПКИ ----------------
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,12 +93,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{r[0]}\n{r[1]}\nСумма: {r[2]} ₽\nКомиссия: {r[3]} ₽\nИмя: {r[4]}"
                 for r in rows
             ])
-        await q.edit_message_text(text, reply_markup=menu())
+        await q.edit_message_text(text, reply_markup=main_menu())
 
 # ---------------- СООБЩЕНИЯ ----------------
 async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.chat.id
-
     if uid not in user_state:
         return
 
@@ -122,7 +121,6 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state["amount"] = amount
             state["commission"] = round(amount * 0.08, 2)
             state["step"] = "name"
-
             await update.message.reply_text(
                 f"Комиссия 8%: {state['commission']} ₽\nВведите имя:"
             )
@@ -131,7 +129,6 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif step == "name":
         state["name"] = text
-
         cursor.execute(
             "INSERT INTO jobs (user_id, role, title, description, amount, commission, name) VALUES (?,?,?,?,?,?,?)",
             (
@@ -145,22 +142,21 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
         conn.commit()
-
         user_state.pop(uid)
-
-        await update.message.reply_text("Готово ✅", reply_markup=menu())
+        await update.message.reply_text("Объявление добавлено ✅", reply_markup=main_menu())
 
 # ---------------- ЗАПУСК ----------------
 if __name__ == "__main__":
-    # HTTP для Render
     threading.Thread(target=start_http, daemon=True).start()
 
     app = ApplicationBuilder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
 
-    print("BOT STARTED")
+    # удаляем webhook, чтобы не было конфликтов
+    app.bot.delete_webhook(drop_pending_updates=True)
 
+    print("BOT STARTED")
+    # Здесь главное: просто run_polling без asyncio.run
     app.run_polling()
