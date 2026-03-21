@@ -10,8 +10,8 @@ from telegram.ext import (
 )
 
 # ---------------- Настройки ----------------
-ADMIN_ID = 865595  # сюда свой telegram ID
-DONATE_URL = "https://ваш_донат_ссылка"
+ADMIN_ID = 869818784
+DONATE_URL = "https://t.me/grigelav"
 
 # ---------------- Flask ----------------
 app_web = Flask(__name__)
