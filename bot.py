@@ -1,5 +1,4 @@
 import os
-import asyncio
 import sqlite3
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -36,7 +35,7 @@ conn.commit()
 
 user_state = {}
 
-# ---------------- HTTP ДЛЯ RENDER ----------------
+# ---------------- HTTP (для Render) ----------------
 def start_http():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -44,20 +43,24 @@ def start_http():
             self.end_headers()
             self.wfile.write(b"OK")
 
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
+
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print("PORT OPEN", PORT)
     server.serve_forever()
 
 # ---------------- КНОПКИ ----------------
-def main_menu():
+def menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Добавить объявление", callback_data="add")],
-        [InlineKeyboardButton("Смотреть объявления", callback_data="list")]
+        [InlineKeyboardButton("Добавить", callback_data="add")],
+        [InlineKeyboardButton("Смотреть", callback_data="list")]
     ])
 
 # ---------------- START ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Меню:", reply_markup=main_menu())
+    await update.message.reply_text("Меню:", reply_markup=menu())
 
 # ---------------- КНОПКИ ----------------
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -90,9 +93,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{r[0]}\n{r[1]}\nСумма: {r[2]} ₽\nКомиссия: {r[3]} ₽\nИмя: {r[4]}"
                 for r in rows
             ])
-        await q.edit_message_text(text, reply_markup=main_menu())
+        await q.edit_message_text(text, reply_markup=menu())
 
-# ---------------- ТЕКСТ ----------------
+# ---------------- СООБЩЕНИЯ ----------------
 async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.chat.id
 
@@ -145,22 +148,19 @@ async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_state.pop(uid)
 
-        await update.message.reply_text("Объявление добавлено ✅", reply_markup=main_menu())
+        await update.message.reply_text("Готово ✅", reply_markup=menu())
 
 # ---------------- ЗАПУСК ----------------
-async def main():
+if __name__ == "__main__":
+    # HTTP для Render
+    threading.Thread(target=start_http, daemon=True).start()
+
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
 
-    await app.bot.delete_webhook(drop_pending_updates=True)
-
     print("BOT STARTED")
 
-    await app.run_polling()
-
-if __name__ == "__main__":
-    threading.Thread(target=start_http, daemon=True).start()
-    asyncio.run(main())
+    app.run_polling()
