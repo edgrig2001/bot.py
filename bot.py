@@ -211,20 +211,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- ЗАПУСК ----------------
 if __name__ == "__main__":
-    # Flask (для Render порта)
-    threading.Thread(target=run_web, daemon=True).start()
+    # 🔥 Flask для Render (живой сервис)
+    threading.Thread(target=run_web).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    # УБИРАЕМ конфликты webhook
+    # Удаляем старые вебхуки, чтобы не было conflict
     app.bot.delete_webhook(drop_pending_updates=True)
 
     print("BOT STARTED")
-
-    # ВАЖНО: обычный polling
     app.run_polling(close_loop=False)
