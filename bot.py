@@ -1,17 +1,15 @@
 import os
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler,
     MessageHandler, filters
 )
-import openai
 
-# Токены берём из Environment
+# Токен бота
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-openai.api_key = OPENAI_API_KEY
 
-# Память истории диалога
+# Словарь для хранения истории диалога
 chat_history = {}
 
 # Кнопки
@@ -28,7 +26,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     chat_history[chat_id] = []
     await update.message.reply_text(
-        "Привет! Я бот с AI. Нажми кнопку или напиши сообщение.",
+        "Привет! Я бот с AI (Hugging Face). Нажми кнопку или напиши сообщение.",
         reply_markup=main_keyboard()
     )
 
@@ -50,6 +48,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_history[chat_id] = []
         await query.edit_message_text("История очищена.", reply_markup=main_keyboard())
 
+# Функция запроса к бесплатной модели Hugging Face
+def query_huggingface(prompt):
+    # Используем модель GPT-J бесплатно через Inference API Hugging Face
+    url = "https://api-inference.huggingface.co/models/EleutherAI/gpt-j-6B"
+    headers = {"Authorization": f"Bearer {os.environ.get('HF_API_KEY','')}"}
+    payload = {"inputs": prompt}
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    if response.status_code == 200:
+        try:
+            return response.json()[0]['generated_text']
+        except Exception:
+            return "AI не смог сгенерировать ответ."
+    else:
+        return f"Ошибка AI: {response.status_code}"
+
 # Обработка текста
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -58,20 +71,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    chat_history[chat_id].append({"role": "user", "content": user_text})
+    chat_history[chat_id].append(f"User: {user_text}")
 
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=chat_history[chat_id]
-        )
-        answer = response.choices[0].message.content.strip()
-        chat_history[chat_id].append({"role": "assistant", "content": answer})
-        await update.message.reply_text(answer, reply_markup=main_keyboard())
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка AI: {e}", reply_markup=main_keyboard())
+    # Формируем историю в один текст
+    prompt = "\n".join(chat_history[chat_id]) + "\nAI:"
 
-# Основная функция запуска (polling)
+    answer = query_huggingface(prompt).strip()
+    chat_history[chat_id].append(f"AI: {answer}")
+
+    await update.message.reply_text(answer, reply_markup=main_keyboard())
+
+# Запуск через polling
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
