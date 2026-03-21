@@ -9,11 +9,7 @@ from telegram.ext import (
     MessageHandler, filters
 )
 
-# ---------------- НАСТРОЙКИ ----------------
-ADMIN_ID = 869818784
-DONATE_URL = "https://вразработке"
-
-# ---------------- Flask для Render ----------------
+# ---------------- Flask ----------------
 app_web = Flask(__name__)
 
 @app_web.route("/")
@@ -28,7 +24,7 @@ def run_web():
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 
 if not TELEGRAM_TOKEN:
-    print("Ошибка: TELEGRAM_TOKEN не задан")
+    print("Нет токена")
     exit(1)
 
 # ---------------- БАЗА ----------------
@@ -43,7 +39,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     title TEXT,
     description TEXT,
     price REAL,
-    contact TEXT,
     paid INTEGER
 )
 """)
@@ -57,19 +52,15 @@ def main_keyboard():
         [InlineKeyboardButton("Добавить объявление", callback_data="add")],
         [InlineKeyboardButton("Искать работу/услугу", callback_data="search")],
         [InlineKeyboardButton("Мои объявления", callback_data="my")],
-        [InlineKeyboardButton("Чаевые 💸", url=DONATE_URL)],
-        [InlineKeyboardButton("Помощь ℹ️", callback_data="help")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="menu")]
+        [InlineKeyboardButton("Чаевые 💸", url="https://ТВОЯ_ССЫЛКА")],
+        [InlineKeyboardButton("Помощь ℹ️", callback_data="help")]
     ])
 
 # ---------------- START ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Выбери действие:", reply_markup=main_keyboard())
-
-# ---------------- MENU ----------------
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_state.pop(update.message.chat.id, None)
-    await update.message.reply_text("🏠 Главное меню:", reply_markup=main_keyboard())
+    chat_id = update.message.chat.id
+    user_state[chat_id] = {"step": "auth"}
+    await update.message.reply_text("👤 Введите ваше имя:")
 
 # ---------------- КНОПКИ ----------------
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,11 +69,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.from_user.id
     data = query.data
 
-    if data == "menu":
-        user_state.pop(chat_id, None)
-        await query.edit_message_text("🏠 Главное меню:", reply_markup=main_keyboard())
-
-    elif data == "add":
+    if data == "add":
         keyboard = [
             [InlineKeyboardButton("Работодатель", callback_data="role_employer")],
             [InlineKeyboardButton("Соискатель", callback_data="role_worker")],
@@ -112,30 +99,18 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "confirm":
         state = user_state.get(chat_id, {})
-
         cursor.execute(
-            "INSERT INTO jobs (user_id, role, city, title, description, price, contact, paid) VALUES (?,?,?,?,?,?,?,?)",
-            (chat_id, state["role"], "Челны", state["title"], state["desc"], state["price"], state["contact"], 1)
+            "INSERT INTO jobs (user_id, role, city, title, description, price, paid) VALUES (?,?,?,?,?,?,?)",
+            (chat_id, state["role"], "Челны", state["title"], state["desc"], state["price"], 1)
         )
         conn.commit()
-
-        # Уведомление администратору
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"📩 Новое объявление!\n\n"
-            f"👤 {state.get('name','')}\n"
-            f"📞 {state['contact']}\n"
-            f"💼 {state['title']}\n"
-            f"💰 {state['price']} ₽"
-        )
-
         user_state.pop(chat_id)
         await query.edit_message_text("✅ Объявление опубликовано!", reply_markup=main_keyboard())
 
     elif data == "search":
-        jobs = cursor.execute("SELECT title, description, price, city, contact FROM jobs WHERE paid=1").fetchall()
+        jobs = cursor.execute("SELECT title, description, price, city FROM jobs WHERE paid=1").fetchall()
         text = "😔 Нет объявлений" if not jobs else "\n\n".join(
-            [f"{t[0]} ({t[3]})\n{t[1]}\n💰 {t[2]} ₽\n📞 {t[4]}" for t in jobs]
+            [f"{t[0]} ({t[3]})\n{t[1]}\n💰 {t[2]} ₽" for t in jobs]
         )
         await query.edit_message_text(text, reply_markup=main_keyboard())
 
@@ -148,11 +123,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "help":
         await query.edit_message_text(
-            "✨ *Спасибо, что используете наш бот!*\n\n"
+            "✨ *Спасибо, что посетили наш бот!*\n\n"
             "💼 Добавляйте объявления\n"
-            "🔍 Находите клиентов\n\n"
-            "💸 Поддержите проект через 'Чаевые'\n\n"
-            "📩 @grigelav",
+            "🔍 Находите работу и услуги\n\n"
+            "💸 Поддержите нас через кнопку *Чаевые*\n\n"
+            "📩 По вопросам: @grigelav",
             parse_mode="Markdown",
             reply_markup=main_keyboard()
         )
@@ -168,7 +143,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = state.get("step")
 
     if not step:
-        await update.message.reply_text("❗ Используйте кнопки ниже", reply_markup=main_keyboard())
         return
 
     if step == "auth":
@@ -201,14 +175,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 {state['price']} ₽\n📞 {state['contact']}",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Подтвердить", callback_data="confirm"),
-                 InlineKeyboardButton("Отмена", callback_data="menu")]
+                 InlineKeyboardButton("Отмена", callback_data="cancel")]
             ])
         )
         state.pop("step")
 
 # ---------------- ЗАПУСК ----------------
 if __name__ == "__main__":
-    # 🔥 фикс Render (порт)
     threading.Thread(target=run_web).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
